@@ -1,79 +1,67 @@
 # Arda Mavi
 import os
-import sys
-import platform
 import numpy as np
-from time import sleep
-from PIL import ImageGrab
-from game_control import *
-from predict import predict
-from scipy.misc import imresize
-from game_control import get_id
-from get_dataset import save_img
-from multiprocessing import Process
-from keras.models import model_from_json
-from pynput.mouse import Listener as mouse_listener
-from pynput.keyboard import Listener as key_listener
+from keras.utils import to_categorical
+from PIL import Image
+from sklearn.model_selection import train_test_split
 
-def get_screenshot():
-    img = ImageGrab.grab()
-    img = np.array(img)[:,:,:3] # Get first 3 channel from image as numpy array.
-    img = imresize(img, (150, 150, 3)).astype('float32')/255.
+def imresize(img, size):
+    """
+    Reemplazo de scipy.misc.imresize usando Pillow.
+    size: tuple (height, width, channels) o (height, width)
+    """
+    if len(size) == 3:
+        size = (size[0], size[1])
+    return np.array(Image.fromarray(img).resize(size, Image.BICUBIC))
+
+def imread(path):
+    """Leer imagen usando Pillow"""
+    img = Image.open(path).convert('RGB')
+    return np.array(img)
+
+def imsave(path, img):
+    """Guardar imagen usando Pillow"""
+    Image.fromarray(img).save(path)
+
+def get_img(data_path):
+    img = imread(data_path)
+    img = imresize(img, (150, 150, 3))
     return img
 
-def save_event_keyboard(data_path, event, key):
-    key = get_id(key)
-    data_path = data_path + '/-1,-1,{0},{1}'.format(event, key)
-    screenshot = get_screenshot()
-    save_img(data_path, screenshot)
+def save_img(img, path):
+    imsave(path, img)
     return
 
-def save_event_mouse(data_path, x, y):
-    data_path = data_path + '/{0},{1},0,0'.format(x, y)
-    screenshot = get_screenshot()
-    save_img(data_path, screenshot)
-    return
+def get_dataset(dataset_path='Data/Train_Data'):
+    try:
+        X = np.load('Data/npy_train_data/X.npy')
+        Y = np.load('Data/npy_train_data/Y.npy')
+    except:
+        labels = os.listdir(dataset_path)  # Obtener etiquetas
+        X = []
+        Y = []
+        count_categori = [-1, '']  # Para codificar etiquetas
+        for label in labels:
+            datas_path = dataset_path + '/' + label
+            for data in os.listdir(datas_path):
+                img = get_img(datas_path + '/' + data)
+                X.append(img)
+                # Para codificar etiquetas:
+                if data != count_categori[1]:
+                    count_categori[0] += 1
+                    count_categori[1] = data.split(',')
+                Y.append(count_categori[0])
 
-def listen_mouse():
-    data_path = 'Data/Train_Data/Mouse'
-    if not os.path.exists(data_path):
-        os.makedirs(data_path)
+        # Crear dataset
+        X = np.array(X).astype('float32') / 255.
+        Y = np.array(Y).astype('float32')
+        Y = to_categorical(Y, count_categori[0] + 1)
 
-    def on_click(x, y, button, pressed):
-        save_event_mouse(data_path, x, y)
+        if not os.path.exists('Data/npy_train_data/'):
+            os.makedirs('Data/npy_train_data/')
+        np.save('Data/npy_train_data/X.npy', X)
+        np.save('Data/npy_train_data/Y.npy', Y)
 
-    def on_scroll(x, y, dx, dy):
-        pass
-    
-    def on_move(x, y):
-        pass
+    X, X_test, Y, Y_test = train_test_split(X, Y, test_size=0.1, random_state=42)
+    return X, X_test, Y, Y_test
 
-    with mouse_listener(on_move=on_move, on_click=on_click, on_scroll=on_scroll) as listener:
-        listener.join()
-
-def listen_keyboard():
-    data_path = 'Data/Train_Data/Keyboard'
-    if not os.path.exists(data_path):
-        os.makedirs(data_path)
-
-    def on_press(key):
-        save_event_keyboard(data_path, 1, key)
-
-    def on_release(key):
-        save_event_keyboard(data_path, 2, key)
-
-    with key_listener(on_press=on_press, on_release=on_release) as listener:
-        listener.join()
-
-def main():
-    dataset_path = 'Data/Train_Data/'
-    if not os.path.exists(dataset_path):
-        os.makedirs(dataset_path)
-
-    # Start to listening mouse with new process:
-    Process(target=listen_mouse, args=()).start()
-    listen_keyboard()
-    return
-
-if __name__ == '__main__':
-    main()
